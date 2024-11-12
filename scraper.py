@@ -194,7 +194,7 @@ class FTScraper:
 			current_product['Handle'] = product_data['handle']
 			current_product['Title'] = product_data['title']
 			current_product['Body (HTML)'] = product_data['description']
-			current_product['Vendor'] = 'FTOYS'
+			current_product['Vendor'] = 'DTI'
 			breadcrumbs = tree.css('li.breadcrumb__item')
 			breadcrumb_list = [breadcrumb.text(strip=True) for breadcrumb in breadcrumbs]
 			current_product['Product Category'] = ' > '.join(breadcrumb_list[1:-1])
@@ -264,7 +264,7 @@ class FTScraper:
 			current_product['Variant SKU'] = variant_skus
 			current_product['Variant Grams'] = variant_weight
 			current_product['Variant Inventory Qty'] = variant_qty
-			current_product['Google Shopping / Custom Label 0'] = 'FTOYS'
+			current_product['Google Shopping / Custom Label 0'] = 'DTI'
 			current_product['Variant Image'] = variant_image
 			current_product['Cost per item'] = variant_cost
 			current_product['Variant Price'] = [self.get_price(x) for x in variant_cost]
