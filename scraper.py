@@ -51,6 +51,56 @@ class FTScraper:
 
 		return cleaned_html
 
+	# def auto_correct_json(self, json_string):
+	# 	print(json_string)
+
+	# 	try:
+	# 		product_data_str = json_string + r']}'
+	# 		product_data = json.loads(product_data_str)
+	# 	except Exception:
+	# 		product_data_str = json_string + r'}]}'
+	# 		product_data = json.loads(product_data_str)
+	# 	finally:
+	# 		print(product_data_str)
+	# 		return product_data
+
+	# def debug_explode_columns(self, df, columns_to_explode):
+	#     """
+	#     Debug which rows have mismatched lengths when trying to explode multiple columns.
+
+	#     Args:
+	#         df: pandas DataFrame
+	#         columns_to_explode: list of column names to check
+
+	#     Returns:
+	#         DataFrame containing problematic rows and their list lengths
+	#     """
+	#     # Create a dict to store lengths of lists in each column
+	#     lengths = {}
+
+	#     # Calculate length of each list in each column
+	#     for col in columns_to_explode:
+	#         lengths[f'{col}_length'] = df[col].apply(lambda x: len(x) if isinstance(x, (list, tuple)) else 1)
+
+	#     # Create a DataFrame with the lengths
+	#     length_df = pd.DataFrame(lengths)
+
+	#     # Find rows where lengths don't match
+	#     first_col_length = length_df.iloc[:, 0]
+	#     mismatched_mask = False
+
+	#     for col in length_df.columns[1:]:
+	#         mismatched_mask |= (length_df[col] != first_col_length)
+
+	#     # Get problematic rows
+	#     problem_rows = df[mismatched_mask].copy()
+
+	#     # Add length columns to the output
+	#     for col, length in lengths.items():
+	#         problem_rows[col] = length[mismatched_mask]
+
+	#     return problem_rows
+
 	def get_product_count(self, url):
 		headers = {
 			'user-agent': self.user_agent
@@ -121,7 +171,7 @@ class FTScraper:
 		with open('shopify_schema.json', 'r') as file:
 			product_schema = json.load(file)
 
-		for data in datas[0:1]:
+		for data in datas:
 			current_product = product_schema.copy()
 			tree = HTMLParser(data[1])
 
@@ -133,24 +183,30 @@ class FTScraper:
 					script_content = script.text()
 					break
 			if script_content:
-				product_data_match = re.search(r'productData:\s*({.*?})', script_content, re.DOTALL)
+				# product_data_match = re.search(r'productData:\s*({.*?})', script_content, re.DOTALL)
+				product_data_match = re.search(r'productData:\s*({.*?})(?=,\s*productCollections:)', script_content, re.DOTALL)
 				if product_data_match:
-					product_data_str = product_data_match.group(1) + ']}'
-					product_data = json.loads(product_data_str)
+					# try:
+					product_data = json.loads(product_data_match.group(1))
+					# except Exception:
+					# 	product_data = self.auto_correct_json(product_data_match.group(1))
 
 			current_product['Handle'] = product_data['handle']
 			current_product['Title'] = product_data['title']
 			current_product['Body (HTML)'] = product_data['description']
 			current_product['Vendor'] = 'FTOYS'
-			breadcrumbs = tree.css_first('div.product-breadcrumbs').text(strip=True).split('/')
-			current_product['Product Category'] = ' > '.join(breadcrumbs[1:-1])
+			breadcrumbs = tree.css('li.breadcrumb__item')
+			breadcrumb_list = [breadcrumb.text(strip=True) for breadcrumb in breadcrumbs]
+			current_product['Product Category'] = ' > '.join(breadcrumb_list[1:-1])
 			current_product['Type'] = product_data['type']
 			current_product['Tags'] = ', '.join(product_data['tags'])
-			product_elem = tree.css_first('product-info > div.product__info')
-			# print(product_elem.html)
-			option_labels = product_elem.css('div.product-variant-picker__option-label > span.heading-font-family')
-			for index, option_label in enumerate(option_labels, 1):
-				current_product[f'Option{index} Name'] = option_label.text(strip=True).split(':')[0]
+			product_elem = tree.css_first('div.product-block-list__item--info')
+			option_label = product_elem.css_first('span.product-form__option-name')
+			if not option_label:
+				option_label = product_elem.css_first('label.product-form__option-name')
+			if option_label:
+			# for index, option_label in enumerate(option_labels, 1):
+				current_product['Option1 Name'] = option_label.text(strip=True).split(':')[0]
 
 			option1_values = list()
 			option2_values = list()
@@ -183,9 +239,18 @@ class FTScraper:
 					option3_values = ''
 
 				variant_skus.append(variant['sku'])
-				variant_weight.append(round(variant['weight'] / 100, 2))
-				variant_qty.append(10 if variant['available'] else 0)
-				variant_cost.append(round(variant['price'] / 100, 2))
+				try:
+					variant_weight.append(round(variant['weight'] / 100, 2))
+				except KeyError:
+					pass
+				try:
+					variant_qty.append(10 if variant['available'] else 0)
+				except KeyError:
+					variant_qty.append(10 if product_data['available'] else 0)
+				try:
+					variant_cost.append(round(variant['price'] / 100, 2))
+				except KeyError:
+					variant_cost.append(round(product_data['price'] / 100, 2))
 				try:
 					variant_image.append(f"https:{variant['featured_image']['src']}")
 				except Exception:
@@ -206,8 +271,11 @@ class FTScraper:
 			current_product['Variant Compare At Price'] = ''
 			current_product['Variant Requires Shipping'] = variant_requires_shipping
 			current_product['Variant Taxable'] = variant_taxable
-			current_product['Image Src'] = [f'https:{url}' for url in product_data['images']]
-			current_product['Image Alt Text'] = [url.split('/')[-1].split('?')[0] for url in product_data['images']]
+			try:
+				current_product['Image Src'] = [f'https:{url}'for url in product_data['images']]
+				current_product['Image Alt Text'] = [url.split('/')[-1].split('?')[0] for url in product_data['images']]
+			except KeyError:
+				pass
 
 			product_datas.append(current_product)
 
@@ -218,22 +286,44 @@ class FTScraper:
 		return df
 
 	def transform_product_datas(self, df):
+		# try:
+	    # First check for problematic rows
+		    # problems = self.debug_explode_columns(df, [
+		    # 	'Option1 Value', 'Variant SKU', 'Variant Grams', 'Variant Inventory Qty',
+		    #     'Variant Price', 'Variant Requires Shipping', 'Variant Taxable', 'Variant Image',
+		    #     'Cost per item'
+		    # ])
+
+		    # if len(problems) > 0:
+		    #     print("Found problematic rows:")
+		    #     print(problems[[
+		    #         'Handle', 'Option1 Name', 'Option1 Value', 'Variant SKU'
+		    #     ]])
+		    # else:
+		        # If no problems found, proceed with explode
+
 		df = df.explode([
-			'Option1 Value', 'Variant SKU', 'Variant Grams', 'Variant Inventory Qty',
-			'Variant Price', 'Variant Requires Shipping', 'Variant Taxable', 'Variant Image',
-			'Cost per item'],
-			ignore_index=True)
+            'Option1 Value', 'Variant SKU', 'Variant Grams', 'Variant Inventory Qty',
+            'Variant Price', 'Variant Requires Shipping', 'Variant Taxable', 'Variant Image',
+            'Cost per item'
+            ],
+            ignore_index=True
+        )
+
 		with open('variant_unused_columns.csv', 'r') as file:
 			rows = csv.reader(file)
 			variant_unused_columns = [row[0] for row in rows]
-		df.loc[df.duplicated('Handle', keep='first'), variant_unused_columns] = ''
+			df.loc[df.duplicated('Handle', keep='first'), variant_unused_columns] = ''
 
 		df = df.explode(['Image Src', 'Image Alt Text'], ignore_index=True)
 		with open('images_unused_columns.csv', 'r') as file:
 			rows = csv.reader(file)
 			images_unused_columns = [row[0] for row in rows]
-		df.loc[df.duplicated('Variant SKU', keep='first'), images_unused_columns] = ''
-		df.drop(columns=['Variants', 'Battery Option Value', 'Battery Price'])
+			df.loc[df.duplicated('Variant SKU', keep='first'), images_unused_columns] = ''
+			df.drop(columns=['Variants', 'Battery Option Value', 'Battery Price'])
+
+		# except Exception as e:
+		# 	print(f"Error: {e}")
 
 		return df
 
